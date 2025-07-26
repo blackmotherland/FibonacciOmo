@@ -23,7 +23,8 @@ COPY --from=builder /app/requirements.txt .
 
 # Install packages including upgraded setuptools
 RUN pip install --upgrade pip && \
-    pip install --no-index --find-links=/wheels -r requirements.txt
+    pip install --no-index --find-links=/wheels -r requirements.txt && \
+    pip install --no-cache-dir --upgrade "setuptools>=80.0.0"
 
 # Copy application code
 COPY ./app /app
