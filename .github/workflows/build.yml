@@ -37,6 +37,9 @@ jobs:
       with:
         ref: ${{ github.sha }}
 
+    - name: Show Dockerfile content
+      run: cat Dockerfile
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
