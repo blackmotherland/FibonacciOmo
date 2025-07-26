@@ -134,11 +134,16 @@ def get_fibonacci(n: int, response: Response, if_none_match: str = Header(None))
         else:
             return {"n": n, "fibonacci": cached_result}
 
+    start_time = time.perf_counter_ns()
     if n > 92: 
         result = fibonacci_fast_doubling(n)
     else:
         result = fibonacci_iterative(n)
+    end_time = time.perf_counter_ns()
     
+    compute_time_us = (end_time - start_time) // 1000
+    response.headers["X-Compute-us"] = str(compute_time_us)
+
     result_str = str(result)
     etag = hashlib.md5(result_str.encode()).hexdigest()
 

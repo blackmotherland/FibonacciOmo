@@ -161,4 +161,14 @@ def test_cache_warmup(mock_redis):
         # Check that setex was called for all numbers from 0 to 99.
         assert mock_redis.setex.call_count == 100
         # A quick check on one of the calls to make sure it's correct.
-        mock_redis.setex.assert_any_call(f"fib:42", 86400, str(267914296)) 
+        mock_redis.setex.assert_any_call(f"fib:42", 86400, str(267914296))
+
+@patch('app.main.redis_client')
+def test_compute_time_header(mock_redis):
+    mock_redis.get.return_value = None # cache miss
+
+    response = client.get("/v1/fib?n=50")
+    assert response.status_code == 200
+    assert "X-Compute-us" in response.headers
+    # The time should be a positive integer.
+    assert int(response.headers["X-Compute-us"]) >= 0 
