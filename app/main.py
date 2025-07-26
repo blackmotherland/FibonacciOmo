@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from typing import Union
 from contextlib import asynccontextmanager
 from prometheus_fastapi_instrumentator import Instrumentator
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
 # Python chokes on converting huge numbers to strings. This removes the limit.
 sys.set_int_max_str_digits(0)
@@ -32,6 +33,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 Instrumentator().instrument(app).expose(app)
+FastAPIInstrumentor.instrument_app(app)
 
 redis_host = os.environ.get("REDIS_HOST", "localhost")
 redis_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)

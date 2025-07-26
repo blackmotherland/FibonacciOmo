@@ -3,4 +3,6 @@ uvicorn[standard]
 pytest
 httpx
 redis
-prometheus-fastapi-instrumentator 
+prometheus-fastapi-instrumentator
+opentelemetry-instrumentation-fastapi
+opentelemetry-exporter-jaeger 

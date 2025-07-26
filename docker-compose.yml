@@ -7,8 +7,11 @@ services:
       - "8000:8000"
     environment:
       - REDIS_HOST=redis
+      - OTEL_SERVICE_NAME=fibonacci-api
+      - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://jaeger:4318/v1/traces
     depends_on:
       - redis
+      - jaeger
     volumes:
       - ./app:/app
 
@@ -31,4 +34,10 @@ services:
     depends_on:
       - prometheus
     volumes:
-      - ./grafana/provisioning/:/etc/grafana/provisioning/ 
+      - ./grafana/provisioning/:/etc/grafana/provisioning/
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "4318:4318"   # OTLP endpoint 
