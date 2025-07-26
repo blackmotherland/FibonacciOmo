@@ -17,6 +17,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Remove vulnerable distro setuptools and clean apt cache
+RUN apt-get update && \
+    apt-get purge -y python3-setuptools && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+
 # Copy built wheels and requirements from the builder stage
 COPY --from=builder /app/wheels /wheels
 COPY --from=builder /app/requirements.txt .
