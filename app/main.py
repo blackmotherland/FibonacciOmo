@@ -119,7 +119,52 @@ async def rate_limit_middleware(request: Request, call_next):
     return response
 
 
-@app.get("/v1/fib")
+@app.get(
+    "/v1/fib",
+    responses={
+        200: {
+            "description": "Successful Response",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        "small_number": {
+                            "summary": "A small number example",
+                            "value": {"n": 10, "fibonacci": 55}
+                        },
+                        "large_number": {
+                            "summary": "A large number example (returned as string)",
+                            "value": {"n": 95, "fibonacci": "31940434634990099905"}
+                        }
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "Invalid Input",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Input must be a non-negative integer."}
+                }
+            }
+        },
+        422: {
+            "description": "Validation Error",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": [
+                            {
+                                "loc": ["query", "n"],
+                                "msg": "value is not a valid integer",
+                                "type": "type_error.integer"
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    }
+)
 def get_fibonacci(n: int, response: Response, if_none_match: str = Header(None)):
     if n < 0:
         raise HTTPException(status_code=400, detail="Input must be a non-negative integer.")

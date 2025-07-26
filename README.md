@@ -54,4 +54,8 @@ This is a simple REST API that computes and returns the nth number in the Fibona
 3.  **View the metrics:**
     - **Prometheus:** http://localhost:9090
     - **Grafana:** http://localhost:3000 (admin/admin)
-    - **Jaeger:** http://localhost:16686 
+    - **Jaeger:** http://localhost:16686
+
+## Deployment Notes
+
+For a production deployment using Helm, using the `--atomic` flag during upgrades is recommended as it enables automated rollback on a failed deploy, ensuring the service remains available. 
