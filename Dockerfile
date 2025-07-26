@@ -3,12 +3,13 @@ FROM python:3.11-slim as builder
 
 WORKDIR /app
 
-# Install build dependencies and upgrade setuptools for security
-RUN pip install --upgrade pip setuptools>=78.1.1
-
-# Copy and install requirements (setuptools is explicitly listed first)
+# Copy requirements first
 COPY requirements.txt .
-RUN pip wheel --no-cache-dir --wheel-dir /app/wheels -r requirements.txt
+
+# Install build dependencies and upgrade setuptools for security
+RUN pip install --upgrade pip && \
+    pip install --upgrade setuptools>=78.1.1 && \
+    pip wheel --no-cache-dir --wheel-dir /app/wheels -r requirements.txt
 
 
 # Stage 2: Runtime
@@ -16,9 +17,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy built wheels from the builder stage
+# Copy built wheels and requirements from the builder stage
 COPY --from=builder /app/wheels /wheels
-COPY requirements.txt .
+COPY --from=builder /app/requirements.txt .
 
 # Install packages including upgraded setuptools
 RUN pip install --upgrade pip && \
