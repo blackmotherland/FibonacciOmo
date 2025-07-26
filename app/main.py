@@ -1,7 +1,9 @@
 import sys
 import redis
 import hashlib
-from fastapi import FastAPI, HTTPException, Response, Header
+import math
+import time
+from fastapi import FastAPI, HTTPException, Response, Header, Request
 from pydantic import BaseModel, Field
 from typing import Union
 
@@ -10,6 +12,10 @@ sys.set_int_max_str_digits(0)
 
 app = FastAPI()
 redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
+
+# Rate limiting settings
+RATE_LIMIT_TOKENS = 100
+RATE_LIMIT_WINDOW = 60 # seconds
 
 # Docs helper.
 class FibonacciResponse(BaseModel):
@@ -36,6 +42,57 @@ def fibonacci_fast_doubling(n: int) -> int:
         else:
             a, b = a2, b2
     return a
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    # We only want to rate limit the /v1/fib endpoint.
+    if not request.url.path.startswith("/v1/fib"):
+        return await call_next(request)
+
+    # In a real app, you'd get the client identifier from an API key or auth token.
+    # For this exercise, we'll just use the host.
+    client_id = request.client.host
+    bucket_key = f"rate_limit:{client_id}"
+    
+    # Check if the bucket exists
+    if not redis_client.exists(bucket_key):
+        # Create a new bucket with full tokens and a 60s expiration
+        redis_client.hset(bucket_key, mapping={
+            "tokens": RATE_LIMIT_TOKENS,
+            "last_refill": int(time.time())
+        })
+        redis_client.expire(bucket_key, RATE_LIMIT_WINDOW)
+
+    bucket = redis_client.hgetall(bucket_key)
+    tokens = float(bucket.get("tokens", RATE_LIMIT_TOKENS))
+    last_refill = int(bucket.get("last_refill", int(time.time())))
+
+    # Refill the bucket based on time elapsed
+    time_since_refill = int(time.time()) - last_refill
+    refill_amount = (time_since_refill / RATE_LIMIT_WINDOW) * RATE_LIMIT_TOKENS
+    tokens = min(RATE_LIMIT_TOKENS, tokens + refill_amount)
+    
+    # Get 'n' from query params to calculate request cost
+    try:
+        n = int(request.query_params.get("n", 1))
+        request_cost = 1 + math.floor(math.log10(n + 1))
+    except (ValueError, TypeError):
+        request_cost = 1 # Default cost for invalid 'n'
+
+    if tokens < request_cost:
+        raise HTTPException(status_code=429, detail="Too Many Requests")
+
+    # Consume tokens
+    new_token_count = tokens - request_cost
+    redis_client.hset(bucket_key, "tokens", new_token_count)
+    
+    response = await call_next(request)
+    
+    # Add rate limit headers to the response
+    response.headers["X-RateLimit-Remaining"] = str(int(new_token_count))
+    response.headers["X-RateLimit-Cost"] = str(request_cost)
+    return response
+
 
 @app.get("/v1/fib")
 def get_fibonacci(n: int, response: Response, if_none_match: str = Header(None)):

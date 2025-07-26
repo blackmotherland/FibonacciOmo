@@ -2,6 +2,10 @@ from fastapi.testclient import TestClient
 from app.main import app
 import hashlib
 from unittest.mock import patch
+import unittest
+import time
+import pytest
+from fastapi import HTTPException
 
 client = TestClient(app)
 
@@ -103,4 +107,44 @@ def test_cache_miss(mock_redis):
     args, _ = mock_redis.setex.call_args
     assert args[0] == f"fib:{n}" # key
     assert args[1] == 86400      # ttl
-    assert isinstance(args[2], str) # value 
+    assert isinstance(args[2], str) # value
+
+@patch('app.main.redis_client')
+def test_rate_limiter(mock_redis):
+    client_host = "testclient" # TestClient's default host is 'testclient'
+    bucket_key = f"rate_limit:{client_host}"
+
+    # First request, bucket doesn't exist yet, and it's a cache miss.
+    mock_redis.exists.return_value = False
+    mock_redis.get.return_value = None
+    mock_redis.hgetall.return_value = {} # Empty bucket initially
+
+    response = client.get("/v1/fib?n=10")
+    assert response.status_code == 200
+    assert "X-RateLimit-Remaining" in response.headers
+    assert "X-RateLimit-Cost" in response.headers
+    
+    # Check that a new bucket was created
+    mock_redis.hset.assert_any_call(bucket_key, mapping={
+        "tokens": 100,
+        "last_refill": unittest.mock.ANY
+    })
+
+    # Subsequent request, consume tokens
+    mock_redis.exists.return_value = True
+    mock_redis.get.return_value = None # Still a cache miss for the underlying fib call
+    mock_redis.hgetall.return_value = {"tokens": "98", "last_refill": str(int(time.time()))}
+
+    response = client.get("/v1/fib?n=1000")
+    assert response.status_code == 200
+    # Cost for n=1000 is 1 + floor(log10(1001)) = 1 + 3 = 4
+    # 98 - 4 = 94 remaining
+    assert response.headers["X-RateLimit-Remaining"] == "94"
+    assert response.headers["X-RateLimit-Cost"] == "4"
+
+    # Request that exceeds token limit
+    mock_redis.get.return_value = None # Still a cache miss
+    mock_redis.hgetall.return_value = {"tokens": "1", "last_refill": str(int(time.time()))}
+    with pytest.raises(HTTPException) as excinfo:
+        client.get("/v1/fib?n=1000") # costs 4 tokens
+    assert excinfo.value.status_code == 429 
