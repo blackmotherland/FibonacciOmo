@@ -37,6 +37,16 @@ This is a simple REST API that computes and returns the nth number in the Fibona
     curl "http://localhost:8000/v1/fib?n=10"
     ```
 
+## Testing the API
+
+To run the full suite of unit and integration tests, use the following command:
+
+```bash
+make test
+```
+
+This will run all the tests in the `tests/` directory and verify that the core logic, caching, and other features are working correctly.
+
 ## Observability Quick Demo
 
 1.  **Start the stack:**
@@ -58,54 +68,88 @@ This is a simple REST API that computes and returns the nth number in the Fibona
 
 ## Operational Considerations
 
-(how I’d run this, in real life, with what I know works)
+(how I’d take this from a take-home project to something I’d trust in a real production environment)
 
-### Container stuff
+### What’s been delivered
 
-So first off, I package the app using a two-stage Dockerfile. The builder stage installs dependencies, compiles wheels, all that stuff. The final image is clean and tiny—it’s just Python and the app. I always run containers as a non-root user and lock the filesystem to read-only. That combo just makes life easier long-term, especially when you’re running in Kubernetes.
+This assessment includes a complete working version of the Fibonacci API with the core functionality in place. You can run it locally, run the tests, see caching work, and even inspect request headers like ETag and response cost. The rate limiting works. The warm-up logic is in place. It includes the metrics endpoint and basic tracing hooks. It is self-contained and deployable to a dev environment.
 
-Nothing sensitive gets baked into the image—config and secrets get passed in when the container starts, like they should be.
+So for a three-hour scoped exercise, this gives a lot. You can run it, poke it, and see the logic work. The code is tested, and the container builds cleanly. There’s also enough observability that you would know if something broke.
 
-For deploying, I usually stick with Helm. I keep it light—just a simple values file and some templates—and I use helm upgrade --atomic so that if anything breaks during the rollout, it’ll automatically roll back before I even have to look at it.
+### What this does not include (and what we’d need in production)
 
-### CI/CD, the way I like it
+While it is solid as a scoped deliverable, this is not production-hardened. It is not battle-tested for high load, not ready for continuous deployment pipelines, and not built out for platform integration at scale. But here’s how I would take it there.
 
-When I push code, GitHub Actions kicks off a bunch of things:
-	•	I’ve got linters and formatters in pre-commit, along with mypy for types and gitleaks to make sure no one accidentally pushes secrets.
-	•	Then I run tests. They’re quick and cover both small stuff and the full request flow. I care more about catching edge cases than chasing 100% coverage, but it’s usually pretty high.
-	•	Then there’s a supply-chain step: we generate an SBOM and check for CVEs, and I check licenses just to stay ahead of any surprises.
-	•	After that, the container gets built with BuildKit and signed with Cosign. This way, we know exactly what’s been built and that it hasn’t been tampered with.
-	•	Once the image is built, I do a quick smoke test. I spin up the container, hit it with a known request, and make sure things like caching work and the warm-up logic has done its job.
-	•	Argo CD watches the Helm chart. When the image tag changes, it automatically deploys to staging and then to production. If it notices a problem—like pods failing probes—it reverts to the last good version. No manual steps. No firefighting.
+---
 
-### Observability & logs
+### What “Operational Considerations” means to me
 
-For metrics, I track request latency and cache-hit rates. I let Prometheus scrape those every 15 seconds—it gives me enough resolution to catch issues without flooding the system.
+When I talk about operational considerations, I mean the set of decisions that let a service not only run but run consistently, scale safely, recover quickly when it breaks, and keep teams sane while doing it. So for me, this includes the container build and security, the way CI and deployment are structured, how we monitor and alert, how logs and metrics are wired in, and how we think about scaling both the app and the dependencies underneath it.
 
-In Grafana, I auto-load a simple dashboard with latency and error rate. It’s nothing flashy, just enough to let me know how the service is behaving without clicking through menus.
+---
 
-For traces, I use OpenTelemetry’s FastAPI middleware, which makes it easy to track what’s happening inside the app. I keep sampling light—around 10%—so we get enough visibility without flooding Jaeger with data.
+### Containerization
 
-Logs are structured with structlog, and they include things like request ID, status code, how long the Fibonacci calculation took, and so on. Fluent Bit picks those up and ships them to Loki. We keep logs hot for about a week, then archive them to S3. That setup gives us plenty of room for debugging without worrying about costs piling up.
+This service runs in a clean two-stage container. For production, I would take that a bit further. I would pin all dependencies tightly to reduce the surface for security issues. I would also sign the container with something like Cosign so that we are always deploying known, verified images. I would lock the container to a non-root user and run it with a read-only root filesystem. I do that by default for all services unless they need write access, which this does not.
 
-And of course, I’ve got a Prometheus alert wired up to fire if p95 latency starts creeping above what I expect. That alert goes through PagerDuty and gets the right person paged fast.
+Everything would be passed in at runtime—no credentials in the image ever. The final container would be built in CI and pushed to a hardened internal registry with policies in place to reject unsigned or unscanned images.
 
-### Scaling & staying reliable
+---
 
-This service is stateless, so scaling it is easy. Kubernetes handles scaling pods up and down based on CPU or latency. I usually set it up so the app starts with one pod and scales up as needed. Nothing fancy.
+### CI and delivery
 
-Redis is the one stateful piece. I run it in cluster mode with a few masters and replicas. When memory gets tight, the cluster adds more shards. I’ve found that works well for apps like this where usage can spike based on a few common inputs.
+The CI pipeline in this repo is basic, but in a real setup I would go beyond just testing and linting.
 
-To avoid abuse, I’ve built the rate limiter to be smarter than just requests-per-minute. Instead, it takes into account how expensive each call is. So n=5 costs almost nothing, but n=10 million costs a lot more. Each API key has a token bucket, and if you use up your budget, you get a 429. There’s a cap on how much a single client can use per minute, so no one can hog resources.
+The first thing is that the test suite would run inside the actual container. That removes a whole class of “but it worked locally” problems. We would also have static analysis, type checking, secret scanning, and so on, running in pre-commit and CI.
 
-Also, when the app starts up, it pre-calculates and caches the Fibonacci values from n=0 to n=99. These are the most common ones you’ll see in the wild. It helps a lot with cold starts and makes sure those first few requests feel fast.
+Every image would get scanned for vulnerabilities and include a software bill of materials that describes what went into it. Once the image is built and signed, I would push it to a registry and then trigger deployment.
 
-Because the output for any given n is always the same, I use ETag headers and mark the response as immutable. That way, if you put this behind a CDN or a company reverse proxy, you get cache hits automatically without needing extra logic.
+I like to use Argo CD for deployment. I set it up so it watches a Helm chart in Git, and when that changes, it syncs the change to staging. If staging looks good, it syncs it to production. If the rollout fails at any step—pods crashing, failing probes, whatever—Argo just reverts to the last known good version.
 
-### Rollbacks & recovery
+It is zero-touch after it is set up, and it is saved me more than once.
 
-For rollbacks, I lean on Helm’s built-in rollback mechanism. If something goes wrong during a deploy, it’ll just revert to the last working version. It works well and takes a lot of pressure off during rollouts.
+---
 
-Redis gets backed up regularly. We snapshot it overnight and keep daily and weekly backups. If something goes wrong and we need to restore, we can go back to any of those points and pick up without a full rebuild.
+### Monitoring, logs, and visibility
 
-This is how I’d actually run this in production. 
+This is something I always think about early, because it is usually what people miss.
+
+Metrics would be sent to Prometheus. I would track request latency, error rate, and cache-hit ratio. That gives me a solid baseline for how the service is doing. I would also expose those metrics with labels so I can slice by route or response type later if I need to.
+
+For tracing, I would use OpenTelemetry. FastAPI has good support for that. I usually set sampling to about ten percent in production so I get just enough to investigate issues without drowning the backend. Traces would go to something like Jaeger or whatever the team is using already.
+
+Logs are JSON and structured. I use structlog for that. The logs include request ID, route, latency, and whatever else we need to troubleshoot. I forward logs with Fluent Bit to Loki or whatever log store is already in place. I usually keep logs hot for a few days and then archive the rest. That’s saved me during incidents plenty of times.
+
+And finally, alerting. I like to set a threshold on p95 latency and fire an alert if it stays above that line for a few minutes. That catches most issues before users start yelling. And of course that alert goes to PagerDuty or whoever is on-call.
+
+---
+
+### Scaling and high traffic
+
+Let me be clear—this is not a service built for high scale out of the box. But it can be.
+
+The app itself is stateless, which makes it very easy to scale horizontally. I would put an HPA in place that scales based on CPU or latency. If you see the average p95 latency creeping up, you add a few pods.
+
+The real bottleneck at scale is Redis. In production, I would run it clustered with shards and replicas. I would watch memory usage closely, and if it starts climbing, I would scale out or tune eviction policies depending on the access pattern.
+
+To protect against abuse, especially from people calling massive Fibonacci numbers, I use a complexity-aware rate limit. That means each request costs more based on the size of n. You only get a fixed budget per minute. I cap that budget so no one client can overrun the service. That system has worked well for me in real environments.
+
+I also pre-populate the most common requests—like n = 0 to n = 99—on startup so those hit the cache right away. For values that never change, I cache them at the edge with immutable headers and ETags. That lets something like Fastly or Cloudflare serve them directly without hitting the origin.
+
+This lets the app scale way beyond what it looks like at first glance. Most real-world traffic hits the same handful of numbers over and over.
+
+---
+
+### Rollbacks and recovery
+
+I lean on Helm’s built-in rollback when something fails during deployment. It is reliable and automatic. I have seen it revert a broken rollout mid-flight and save the team a lot of stress.
+
+For Redis, I snapshot overnight. I keep a handful of daily and weekly backups. Restoring from those is something I test every once in a a while, just to make sure I still know how. You should never be figuring that out for the first time during a real incident.
+
+---
+
+### Wrapping it up
+
+This service, as it stands, is solid for an assessment. It is clean, tested, traceable, and reasonably observable. But if I were taking this to production, I would harden the pipeline, wrap it in stronger deployment safety nets, and put real observability in place.
+
+For me, operational considerations are not just about making things run. They are about making things boring—because boring means stable, predictable, and safe. When I build systems like this, I want the team to be able to sleep through the night. That’s always the goal. 

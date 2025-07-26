@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from prometheus_fastapi_instrumentator import Instrumentator
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-# Python chokes on converting huge numbers to strings. This removes the limit.
+# Python messes up on converting huge numbers to strings. Removing the limit here.
 sys.set_int_max_str_digits(0)
 
 @asynccontextmanager
@@ -20,14 +20,14 @@ async def lifespan(app: FastAPI):
     print("Warming up the cache...")
     for i in range(100):
         cache_key = f"fib:{i}"
-        # Use SETNX to avoid overwriting existing values, just in case.
+        # Skip if already exists
         if not redis_client.exists(cache_key):
-             # For the warmup, we can just use the iterative version. It's fast enough for small n.
+            # Iterative is fine for small numbers
             result = fibonacci_iterative(i)
             redis_client.setex(cache_key, 86400, str(result))
     print("Cache warmup complete.")
     yield
-    # This code runs on shutdown.
+    # This runs on shutdown.
     print("Shutting down.")
 
 
@@ -38,11 +38,11 @@ FastAPIInstrumentor.instrument_app(app)
 redis_host = os.environ.get("REDIS_HOST", "localhost")
 redis_client = redis.Redis(host=redis_host, port=6379, db=0, decode_responses=True)
 
-# Rate limiting settings
+# Rate limit settings
 RATE_LIMIT_TOKENS = 100
-RATE_LIMIT_WINDOW = 60 # seconds
+RATE_LIMIT_WINDOW = 60  # seconds
 
-# Docs helper.
+# Docs helper......
 class FibonacciResponse(BaseModel):
     n: int
     fibonacci: Union[int, str] = Field(..., description="The nth Fibonacci number. Large numbers are returned as strings to preserve precision.")
@@ -70,12 +70,12 @@ def fibonacci_fast_doubling(n: int) -> int:
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    # We only want to rate limit the /v1/fib endpoint.
+    # We only want to rate limit the /v1/fib endpoint
     if not request.url.path.startswith("/v1/fib"):
         return await call_next(request)
 
-    # In a real app, you'd get the client identifier from an API key or auth token.
-    # For this exercise, we'll just use the host.
+    # In a real app you will have to get the client identifier from an API key or auth token.
+    # For this we will just use the host.
     client_id = request.client.host
     bucket_key = f"rate_limit:{client_id}"
     
@@ -92,7 +92,7 @@ async def rate_limit_middleware(request: Request, call_next):
     tokens = float(bucket.get("tokens", RATE_LIMIT_TOKENS))
     last_refill = int(bucket.get("last_refill", int(time.time())))
 
-    # Refill the bucket based on time elapsed
+    # Refill the bucket based on time
     time_since_refill = int(time.time()) - last_refill
     refill_amount = (time_since_refill / RATE_LIMIT_WINDOW) * RATE_LIMIT_TOKENS
     tokens = min(RATE_LIMIT_TOKENS, tokens + refill_amount)
@@ -102,7 +102,7 @@ async def rate_limit_middleware(request: Request, call_next):
         n = int(request.query_params.get("n", 1))
         request_cost = 1 + math.floor(math.log10(n + 1))
     except (ValueError, TypeError):
-        request_cost = 1 # Default cost for invalid 'n'
+        request_cost = 1 # Default cost for an invalid 'n'
 
     if tokens < request_cost:
         raise HTTPException(status_code=429, detail="Too Many Requests")
@@ -113,7 +113,7 @@ async def rate_limit_middleware(request: Request, call_next):
     
     response = await call_next(request)
     
-    # Add rate limit headers to the response
+    # Add rate limit headers to our response
     response.headers["X-RateLimit-Remaining"] = str(int(new_token_count))
     response.headers["X-RateLimit-Cost"] = str(request_cost)
     return response
@@ -180,7 +180,7 @@ def get_fibonacci(n: int, response: Response, if_none_match: str = Header(None))
         response.headers["ETag"] = etag
         response.headers["Cache-Control"] = "public, immutable, max-age=86400"
         
-        # The cached result is always a string, so we need to decide if we can convert it back to an int.
+        # The cached result is always a string so we need to decide if we can convert it back to an int
         if n < 93:
             return {"n": n, "fibonacci": int(cached_result)}
         else:

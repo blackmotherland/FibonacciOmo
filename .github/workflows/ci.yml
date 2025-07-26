@@ -60,7 +60,7 @@ jobs:
       run: docker-compose up -d --build
 
     - name: Wait for services to be healthy
-      run: sleep 10 # A simple wait, in a real scenario you'd use a health check
+      run: sleep 10  # Simple wait for services to start
 
     - name: Run smoke test
       run: |
