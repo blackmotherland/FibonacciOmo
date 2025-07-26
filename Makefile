@@ -24,6 +24,10 @@ compose-up:
 	@echo "Starting services with Docker Compose..."
 	@docker-compose up -d
 
+compose-build:
+	@echo "Building and starting services with Docker Compose..."
+	@docker-compose up -d --build
+
 compose-down:
 	@echo "Stopping services..."
 	@docker-compose down 
