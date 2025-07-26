@@ -6,11 +6,29 @@ import time
 from fastapi import FastAPI, HTTPException, Response, Header, Request
 from pydantic import BaseModel, Field
 from typing import Union
+from contextlib import asynccontextmanager
 
 # Python chokes on converting huge numbers to strings. This removes the limit.
 sys.set_int_max_str_digits(0)
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # This code runs on startup.
+    print("Warming up the cache...")
+    for i in range(100):
+        cache_key = f"fib:{i}"
+        # Use SETNX to avoid overwriting existing values, just in case.
+        if not redis_client.exists(cache_key):
+             # For the warmup, we can just use the iterative version. It's fast enough for small n.
+            result = fibonacci_iterative(i)
+            redis_client.setex(cache_key, 86400, str(result))
+    print("Cache warmup complete.")
+    yield
+    # This code runs on shutdown.
+    print("Shutting down.")
+
+
+app = FastAPI(lifespan=lifespan)
 redis_client = redis.Redis(host='localhost', port=6379, db=0, decode_responses=True)
 
 # Rate limiting settings

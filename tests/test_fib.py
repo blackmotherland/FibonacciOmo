@@ -147,4 +147,18 @@ def test_rate_limiter(mock_redis):
     mock_redis.hgetall.return_value = {"tokens": "1", "last_refill": str(int(time.time()))}
     with pytest.raises(HTTPException) as excinfo:
         client.get("/v1/fib?n=1000") # costs 4 tokens
-    assert excinfo.value.status_code == 429 
+    assert excinfo.value.status_code == 429
+
+# The TestClient will trigger the lifespan events.
+# We can use this to test the cache warmup.
+@patch('app.main.redis_client')
+def test_cache_warmup(mock_redis):
+    # Simulate that the keys don't exist yet.
+    mock_redis.exists.return_value = False
+
+    # When the TestClient is created, the startup event fires.
+    with TestClient(app) as client:
+        # Check that setex was called for all numbers from 0 to 99.
+        assert mock_redis.setex.call_count == 100
+        # A quick check on one of the calls to make sure it's correct.
+        mock_redis.setex.assert_any_call(f"fib:42", 86400, str(267914296)) 
